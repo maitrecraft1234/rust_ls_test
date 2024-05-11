@@ -145,14 +145,14 @@ fn main() {
     let mut options = Options::new();
     let mut args: Vec<String> = Vec::new();
 
-    for arg in env::args() {
+    for arg in env::args().skip(1) {
         if !arg.starts_with('-') {
             args.push(arg.to_string());
             continue;
         }
         options.options(&arg);
     }
-    if args.len() > 1 {
+    if args.len() > 0 {
         println!(
             "{} {} {} {} {:?}",
             args.len(),
