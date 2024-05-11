@@ -1,9 +1,10 @@
 use std::env;
 use std::fs;
+use std::os::unix::fs::MetadataExt;
 use std::os::unix::fs::PermissionsExt;
 use std::time::SystemTime;
-use std::os::unix::fs::MetadataExt;
 
+#[allow(clippy::struct_excessive_bools)]
 struct Options {
     long_list: bool,
     all: bool,
@@ -12,25 +13,25 @@ struct Options {
 }
 
 impl Options {
-    fn new() -> Options {
-        Options {
+    const fn new() -> Self {
+        Self {
             long_list: false,
             all: false,
             directory: false,
             recursive: false,
         }
     }
-    fn options(&mut self, arg: &String) {
-        if arg.contains("l") {
+    fn options(&mut self, arg: &str) {
+        if arg.contains('l') {
             self.long_list = true;
         }
-        if arg.contains("a") {
+        if arg.contains('a') {
             self.all = true;
         }
-        if arg.contains("d") {
+        if arg.contains('d') {
             self.directory = true;
         }
-        if arg.contains("R") {
+        if arg.contains('R') {
             self.recursive = true;
         }
     }
@@ -44,14 +45,17 @@ fn time_string(time: SystemTime) -> String {
     let days = (time / 86400) % 30;
     let months = (days / 30) % 12;
     let years = days / 365;
-    let str = format!("last mod {}y {}m {}d {}h {}m {}s", years, months, days, hours, mins, secs);
-    
+    let str = format!(
+        "last mod {}y {}m {}d {}h {}m {}s",
+        years, months, days, hours, mins, secs
+    );
+
     str
 }
 
 fn perm_string(mode: u32) -> String {
-    let user = (mode & 0b111000000) >> 6;
-    let group = (mode & 0b111000) >> 3;
+    let user = (mode & 0b111_000_000) >> 6;
+    let group = (mode & 0b111_000) >> 3;
     let other = mode & 0b111;
 
     let user = match user {
@@ -63,67 +67,104 @@ fn perm_string(mode: u32) -> String {
         5 => "r-x",
         6 => "rw-",
         7 => "rwx",
-        _ => "???",
+        _ => unreachable!(),
     };
-    let group = format!("{}{}{}", if group & 0b100 == 0 {"-"} else {"r"}, if group & 0b010 == 0 {"-"} else {"w"}, if group & 0b001 == 0 {"-"} else {"x"});
-    let other = format!("{}{}{}", if other & 0b100 == 0 {"-"} else {"r"}, if other & 0b010 == 0 {"-"} else {"w"}, if other & 0b001 == 0 {"-"} else {"x"});
+    let group = format!(
+        "{}{}{}",
+        if group & 0b100 == 0 { "-" } else { "r" },
+        if group & 0b010 == 0 { "-" } else { "w" },
+        if group & 0b001 == 0 { "-" } else { "x" }
+    );
+    let other = format!(
+        "{}{}{}",
+        if other & 0b100 == 0 { "-" } else { "r" },
+        if other & 0b010 == 0 { "-" } else { "w" },
+        if other & 0b001 == 0 { "-" } else { "x" }
+    );
 
     format!("{}{}{}", user, group, other)
 }
 
-fn print(entry_dir: &String, options: &Options, indent: &String) {
-    let entries = {fs::read_dir(entry_dir).unwrap()};
+fn print(entry_dir: &str, options: &Options, indent: &str) {
+    let entries = { fs::read_dir(entry_dir).unwrap() };
     for entry in entries {
+        let entry = entry.unwrap();
 
-        if !options.all{
-            if let Some(ref byte) = entry.as_ref().unwrap().file_name().as_encoded_bytes().get(0) {
-                if **byte == b'.' {
+        if !options.all {
+            if let Some(byte) = entry.file_name().as_encoded_bytes().first() {
+                if *byte == b'.' {
                     continue;
                 }
             }
         }
-        if options.directory && entry.as_ref().expect("a").file_name().to_str() != Some(entry_dir.as_str()) {
+        if options.directory && entry.file_name().to_str() != Some(entry_dir) {
             continue;
         }
-        if !options.long_list {
-            println!("{}{}", indent, entry.as_ref().unwrap().file_name().to_str().unwrap());
+        if options.long_list {
+            let metadata = entry.metadata().expect("meta");
+            println!(
+                "{}{} {} {} {} {} {} {} {}",
+                indent,
+                time_string(metadata.modified().expect("mod")),
+                metadata.nlink(),
+                metadata.uid(),
+                metadata.gid(),
+                metadata.len(),
+                perm_string(metadata.permissions().mode()),
+                if entry
+                    .file_type()
+                    .expect("idk what I was expecting")
+                    .is_dir()
+                {
+                    "\x1b[94m \x1b[0m"
+                } else {
+                    "\x1b[90m \x1b[0m"
+                },
+                entry.file_name().to_str().unwrap()
+            );
         } else {
-            let metadata = entry.as_ref().expect("some error im not suer").metadata().expect("meta");
-            println!("{}{} {} {} {} {} {} {} {}", indent,
-                     time_string(metadata.modified().expect("mod")),
-                     metadata.nlink(),
-                     metadata.uid(),
-                     metadata.gid(),
-                     metadata.len(),
-                     perm_string(metadata.permissions().mode()),
-                     if entry.as_ref().expect("idk").file_type().expect("idk what I was expecting").is_dir() {"\x1b[94m \x1b[0m"} else {"\x1b[90m \x1b[0m"},
-                     entry.as_ref().unwrap().file_name().to_str().unwrap());
+            println!("{}{}", indent, entry.file_name().to_str().unwrap());
         }
-        if options.recursive && entry.as_ref().expect("idk").file_type().expect("idk what I was expecting").is_dir() {
-            println!("\n{}{:?} :",indent , entry.as_ref().unwrap().path());
-            print(&entry.as_ref().unwrap().path().to_str().unwrap().to_string(), options, &format!("{}\t", indent));
+        if options.recursive
+            && entry
+                .file_type()
+                .expect("idk what I was expecting")
+                .is_dir()
+        {
+            println!("\n{}{:?} :", indent, entry.path());
+            print(
+                entry.path().to_str().unwrap(),
+                options,
+                &format!("{}\t", indent),
+            );
         }
     }
 }
 
 fn main() {
-    let argv: Vec<String> = env::args().collect();
     let mut options = Options::new();
     let mut args: Vec<String> = Vec::new();
 
-    for arg in argv.iter() {
-        if !arg.starts_with("-") {
+    for arg in env::args() {
+        if !arg.starts_with('-') {
             args.push(arg.to_string());
             continue;
         }
-        options.options(arg);
+        options.options(&arg);
     }
     if args.len() > 1 {
-        println!("{} {} {} {} {:?}", args.len(), options.directory, options.all, options.long_list, args);
-        for i in 1..args.len() {
-            print(&argv[i], &options, &"".to_string());
+        println!(
+            "{} {} {} {} {:?}",
+            args.len(),
+            options.directory,
+            options.all,
+            options.long_list,
+            args
+        );
+        for arg in &args {
+            print(arg, &options, "");
         }
     } else {
-        print(&".".to_string(), &options, &"".to_string());
+        print(".", &options, "");
     }
 }
