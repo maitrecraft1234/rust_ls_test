@@ -152,7 +152,9 @@ fn main() {
         }
         options.options(&arg);
     }
-    if args.len() > 0 {
+    if args.is_empty() {
+        print(".", &options, "");
+    } else {
         println!(
             "{} {} {} {} {:?}",
             args.len(),
@@ -164,7 +166,5 @@ fn main() {
         for arg in &args {
             print(arg, &options, "");
         }
-    } else {
-        print(".", &options, "");
     }
 }
